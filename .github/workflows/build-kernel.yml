@@ -20,7 +20,9 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y bc build-essential libncurses5-dev flex bison zip curl wget python3 python3-distutils
+        sudo apt install -y \
+          bc build-essential libncurses5-dev libncurses-dev \
+          flex bison zip curl wget ccache git make python3 python3-pip
 
     - name: Setup Clang stock
       run: |

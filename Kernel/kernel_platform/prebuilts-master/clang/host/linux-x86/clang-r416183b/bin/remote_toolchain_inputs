@@ -1,14 +1,3 @@
-clang
-clang++
-clang.real
-clang++.real
-clang-tidy
-clang-tidy.real
-../lib64/libc++.so.1
-lld
-ld64.lld
-ld.lld
-../lib64/clang/12.0.5/share
-../lib64/clang/12.0.5/lib/linux
-../lib64/clang/12.0.5/include
-../lib64/libxml2.so.2.9.10
+version https://git-lfs.github.com/spec/v1
+oid sha256:8fb78ec87e3fc6102113ae6b91b6715a0c81213fea775219b0ce7aa142e6dd6b
+size 223

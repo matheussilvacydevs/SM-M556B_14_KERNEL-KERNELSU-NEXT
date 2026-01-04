@@ -1,0 +1,2 @@
+Kernel/kernel_platform/prebuilts-master/clang/host/linux-x86/clang-r416183b/bin/* filter=lfs diff=lfs merge=lfs -text
+Kernel/kernel_platform/prebuilts-master/clang/host/linux-x86/clang-r416183b/lib64/* filter=lfs diff=lfs merge=lfs -text

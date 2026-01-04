@@ -3,8 +3,8 @@ name: Build SM-M556B Kernel
 on:
   push:
     tags:
-      - 'v*'           # dispara quando criar uma tag tipo v14.0
-  workflow_dispatch:    # permite rodar manualmente na aba Actions
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -22,7 +22,8 @@ jobs:
         sudo apt update
         sudo apt install -y \
           bc build-essential libncurses5-dev libncurses-dev \
-          flex bison zip curl wget ccache git make python3
+          flex bison zip curl wget ccache git make python3 python3-distutils \
+          libssl-dev libc6-dev libelf-dev
 
     - name: Setup Clang stock
       run: |
@@ -35,9 +36,8 @@ jobs:
 
     - name: Build Kernel
       run: |
-        cd Kernel/kernel_platform/common   # topo do kernel
+        cd Kernel/kernel_platform/common
         echo "Starting kernel build..."
-        # Gera o .config corretamente usando gki_defconfig
         make O=$O gki_defconfig
         make -j$(nproc) O=$O
         echo "Kernel build finished!"

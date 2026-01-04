@@ -35,20 +35,22 @@ jobs:
 
     - name: Build Kernel
       run: |
+        cd Kernel/kernel_platform/common   # topo do kernel onde o Makefile está
         echo "Starting kernel build..."
-        make O=$O KBUILD_DEFCONFIG=Kernel/kernel_platform/common/arch/arm64/configs/gki_defconfig
+        make O=$O KBUILD_DEFCONFIG=arch/arm64/configs/gki_defconfig
         make -j$(nproc) O=$O
         echo "Kernel build finished!"
 
     - name: Package Kernel
       run: |
         echo "Packaging kernel..."
+        cd Kernel/kernel_platform/common
         zip -r SM-M556B_14_KERNEL_${GITHUB_REF##*/}.zip $O
         echo "Package created: SM-M556B_14_KERNEL_${GITHUB_REF##*/}.zip"
 
     - name: Publish Release
       uses: softprops/action-gh-release@v1
       with:
-        files: SM-M556B_14_KERNEL_${GITHUB_REF##*/}.zip
+        files: Kernel/kernel_platform/common/SM-M556B_14_KERNEL_${GITHUB_REF##*/}.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

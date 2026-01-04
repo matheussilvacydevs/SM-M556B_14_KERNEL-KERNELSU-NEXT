@@ -17,27 +17,32 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Setup environment
+    - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y bc build-essential libncurses5-dev flex bison zip curl wget
+        sudo apt install -y bc build-essential libncurses5-dev flex bison zip curl wget python3 python3-distutils
 
     - name: Setup Clang stock
       run: |
+        echo "Configuring Clang stock from repo..."
         export PATH=$PWD/Kernel/kernel_platform/prebuilts-master/clang/host/linux-x86/clang-r547379/bin:$PATH
         export CROSS_COMPILE=aarch64-linux-gnu-
         export ARCH=arm64
         export O=out
-        echo "Clang path configured"
+        echo "Clang PATH set to $PATH"
 
     - name: Build Kernel
       run: |
+        echo "Starting kernel build..."
         make O=$O gki_defconfig
         make -j$(nproc) O=$O
+        echo "Kernel build finished!"
 
     - name: Package Kernel
       run: |
+        echo "Packaging kernel..."
         zip -r SM-M556B_14_KERNEL_${GITHUB_REF##*/}.zip $O
+        echo "Package created: SM-M556B_14_KERNEL_${GITHUB_REF##*/}.zip"
 
     - name: Publish Release
       uses: softprops/action-gh-release@v1

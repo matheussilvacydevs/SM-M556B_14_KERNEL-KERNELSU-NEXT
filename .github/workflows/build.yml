@@ -1,0 +1,45 @@
+name: Build SM-M556B Kernel
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CROSS_COMPILE: aarch64-linux-gnu-
+      ARCH: arm64
+      O: out
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y bc build-essential libncurses5-dev flex bison zip curl wget
+
+    - name: Setup toolchain
+      run: |
+        mkdir -p prebuilts
+        wget -qO- https://releases.linaro.org/components/toolchain/binaries/latest-7/aarch64-linux-gnu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz | tar -xJ -C prebuilts
+        export PATH=$PWD/prebuilts/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/bin:$PATH
+
+    - name: Build Kernel
+      run: |
+        make O=$O msm_m55_defconfig
+        make -j$(nproc) O=$O
+
+    - name: Package kernel
+      run: |
+        zip -r SM-M556B_14_KERNEL_${GITHUB_REF##*/}.zip $O
+
+    - name: Publish Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: SM-M556B_14_KERNEL_${GITHUB_REF##*/}.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

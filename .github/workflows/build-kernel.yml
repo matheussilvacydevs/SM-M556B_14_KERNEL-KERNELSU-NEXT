@@ -3,14 +3,13 @@ name: Build SM-M556B Kernel
 on:
   push:
     tags:
-      - 'v*'
-  workflow_dispatch:  # permite rodar manualmente
+      - 'v*'           # dispara quando criar uma tag tipo v14.0
+  workflow_dispatch:    # permite rodar manualmente na aba Actions
 
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      CROSS_COMPILE: aarch64-linux-gnu-
       ARCH: arm64
       O: out
 
@@ -18,23 +17,25 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Install dependencies
+    - name: Setup environment
       run: |
         sudo apt update
         sudo apt install -y bc build-essential libncurses5-dev flex bison zip curl wget
 
-    - name: Setup toolchain
+    - name: Setup Clang stock
       run: |
-        mkdir -p prebuilts
-        wget -qO- https://releases.linaro.org/components/toolchain/binaries/latest-7/aarch64-linux-gnu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz | tar -xJ -C prebuilts
-        export PATH=$PWD/prebuilts/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/bin:$PATH
+        export PATH=$PWD/Kernel/kernel_platform/prebuilts-master/clang/host/linux-x86/clang-r547379/bin:$PATH
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export ARCH=arm64
+        export O=out
+        echo "Clang path configured"
 
     - name: Build Kernel
       run: |
-        make O=$O msm_m55_defconfig
+        make O=$O gki_defconfig
         make -j$(nproc) O=$O
 
-    - name: Package kernel
+    - name: Package Kernel
       run: |
         zip -r SM-M556B_14_KERNEL_${GITHUB_REF##*/}.zip $O
 

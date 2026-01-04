@@ -1,70 +1,52 @@
-name: Build SM-M556B Kernel
+name: Build SM-M556B Stock Kernel
 
-# Gatilhos: push em tags "v*" e execução manual
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      ARCH: arm64
       O: out
 
     steps:
-    - name: Checkout code
+    - name: Checkout repo
       uses: actions/checkout@v3
 
-    - name: Install dependencies
+    - name: Setup dependencies
       run: |
-        sudo apt update
-        sudo apt install -y \
-          bc build-essential libncurses5-dev libncurses-dev \
-          flex bison zip curl wget ccache git make \
-          python3 python3-dev python3-setuptools \
-          libssl-dev libc6-dev libelf-dev
+        sudo apt-get update
+        sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev bc curl wget unzip cpio python3 python3-venv python3-pip git
 
-    - name: Setup Clang stock
+    - name: Setup Linaro Toolchain
       run: |
-        echo "Configuring Clang stock from repo..."
-        export PATH=$PWD/Kernel/kernel_platform/prebuilts-master/clang/host/linux-x86/clang-r547379/bin:$PATH
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        export ARCH=arm64
-        export O=out
-        echo "Clang PATH set to $PATH"
+        mkdir -p prebuilts
+        wget -qO- https://releases.linaro.org/components/toolchain/binaries/latest-7/aarch64-linux-gnu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz | tar -xJ -C prebuilts
+        export PATH=$PWD/prebuilts/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/bin:$PATH
 
-    - name: Prepare output directories
+    - name: Prepare build directories
       run: |
         cd Kernel/kernel_platform/common
-        make mrproper              # limpa builds antigos
-        mkdir -p $O/usr/include/asm # garante diretório correto para HDRINST
+        mkdir -p $O/usr/include/asm
+        mkdir -p $O/include
 
-    - name: Kernel build
+    - name: Configure kernel
       run: |
         cd Kernel/kernel_platform/common
-        echo "Starting kernel build..."
         make O=$O gki_defconfig
-        make -j$(nproc) O=$O HDRINST=$O/usr/include
-        echo "Kernel build finished!"
+
+    - name: Compile kernel
+      run: |
+        cd Kernel/kernel_platform/common
+        make -j$(nproc) O=$O ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HDRINST=$O/usr/include
 
     - name: Package kernel
       run: |
-        cd Kernel/kernel_platform/common
-        mkdir -p release
-        # Copia arquivos essenciais
-        cp $O/arch/arm64/boot/Image.gz-dtb release/Image.gz-dtb
-        cp $O/arch/arm64/boot/dtbo.img release/ || true
-        cp $O/arch/arm64/boot/dts/vendor/qcom/*.dtb release/ -r || true
-        cd release
-        zip -r SM-M556B_14_KERNEL_${GITHUB_REF##*/}.zip *
-        echo "Package created: SM-M556B_14_KERNEL_${GITHUB_REF##*/}.zip"
+        cd Kernel/kernel_platform/common/$O
+        zip -r ../../../../SM-M556B_14_kernel_build.zip *
 
-    - name: Publish Release
-      uses: softprops/action-gh-release@v1
+    - name: Upload kernel zip
+      uses: actions/upload-artifact@v3
       with:
-        files: Kernel/kernel_platform/common/release/SM-M556B_14_KERNEL_${GITHUB_REF##*/}.zip
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        name: SM-M556B_14_kernel_build
+        path: Kernel/kernel_platform/common/SM-M556B_14_kernel_build.zip

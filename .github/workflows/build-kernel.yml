@@ -36,21 +36,28 @@ jobs:
         export O=out
         echo "Clang PATH set to $PATH"
 
+    - name: Prepare output directories
+      run: |
+        cd Kernel/kernel_platform/common
+        make mrproper              # limpa builds antigos
+        mkdir -p $O/usr/include/asm # garante diretório correto para HDRINST
+
     - name: Kernel build
       run: |
         cd Kernel/kernel_platform/common
         echo "Starting kernel build..."
         make O=$O gki_defconfig
-        make -j$(nproc) O=$O
+        make -j$(nproc) O=$O HDRINST=$O/usr/include
         echo "Kernel build finished!"
 
     - name: Package kernel
       run: |
         cd Kernel/kernel_platform/common
         mkdir -p release
+        # Copia arquivos essenciais
         cp $O/arch/arm64/boot/Image.gz-dtb release/Image.gz-dtb
-        cp $O/arch/arm64/boot/dts/vendor/qcom/*.dtb release/ -r || true
         cp $O/arch/arm64/boot/dtbo.img release/ || true
+        cp $O/arch/arm64/boot/dts/vendor/qcom/*.dtb release/ -r || true
         cd release
         zip -r SM-M556B_14_KERNEL_${GITHUB_REF##*/}.zip *
         echo "Package created: SM-M556B_14_KERNEL_${GITHUB_REF##*/}.zip"

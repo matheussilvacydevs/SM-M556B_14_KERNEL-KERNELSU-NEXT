@@ -46,7 +46,7 @@ jobs:
         zip -r ../../../../SM-M556B_14_kernel_build.zip *
 
     - name: Upload kernel zip
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: SM-M556B_14_kernel_build
         path: Kernel/kernel_platform/common/SM-M556B_14_kernel_build.zip

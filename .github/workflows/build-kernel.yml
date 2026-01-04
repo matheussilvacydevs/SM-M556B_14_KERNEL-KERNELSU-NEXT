@@ -22,7 +22,7 @@ jobs:
         sudo apt update
         sudo apt install -y \
           bc build-essential libncurses5-dev libncurses-dev \
-          flex bison zip curl wget ccache git make python3 python3-pip
+          flex bison zip curl wget ccache git make python3
 
     - name: Setup Clang stock
       run: |
@@ -36,7 +36,7 @@ jobs:
     - name: Build Kernel
       run: |
         echo "Starting kernel build..."
-        make O=$O gki_defconfig
+        make O=$O KBUILD_DEFCONFIG=Kernel/kernel_platform/common/arch/arm64/configs/gki_defconfig
         make -j$(nproc) O=$O
         echo "Kernel build finished!"
 

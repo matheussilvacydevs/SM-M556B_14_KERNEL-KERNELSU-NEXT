@@ -1,4 +1,4 @@
-name: Build SM-M556B Kernel (Safe / No LTO / No Submodules)
+name: Build SM-M556B Kernel (FINAL / NO LTO / NO HDRINST)
 
 on:
   workflow_dispatch:
@@ -13,12 +13,14 @@ jobs:
       LLVM: 1
       LLVM_IAS: 1
       ANDROID_BUILD_TOP: ${{ github.workspace }}
+      INSTALL_HDR_PATH: /dev/null
+      SKIP_HEADERS_INSTALL: 1
 
     steps:
       # ===============================
-      # CHECKOUT (SEM SUBMODULES)
+      # CHECKOUT
       # ===============================
-      - name: Checkout kernel source
+      - name: Checkout kernel
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -31,34 +33,27 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y \
-            bc bison flex git git-lfs \
+            bc bison flex \
+            git git-lfs \
             libssl-dev libelf-dev \
             build-essential \
             python3 \
-            ccache \
-            clang lld
+            clang lld \
+            ccache
 
       # ===============================
-      # LIMPAR SUBMODULES (FIX SAMSUNG)
-      # ===============================
-      - name: Disable Samsung submodules
-        run: |
-          rm -f .gitmodules || true
-          git config --remove-section submodule || true
-
-      # ===============================
-      # SETUP CCACHE (REDUZ OOM)
+      # CCACHE
       # ===============================
       - name: Setup ccache
         run: |
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
-          echo "CCACHE_COMPRESS=1" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=2G" >> $GITHUB_ENV
+          echo "CCACHE_COMPRESS=1" >> $GITHUB_ENV
 
       # ===============================
-      # DESATIVAR LTO (FORÇADO)
+      # FORÇAR DESATIVAR LTO
       # ===============================
-      - name: Force disable LTO (Vega method)
+      - name: Force disable LTO
         run: |
           DEFCONFIG=Kernel/kernel_platform/msm-kernel/arch/arm64/configs/vendor/x55_defconfig
 
@@ -67,7 +62,7 @@ jobs:
           sed -i 's/CONFIG_LTO_CLANG_THIN=y/CONFIG_LTO_CLANG_THIN=n/g' $DEFCONFIG || true
           sed -i 's/CONFIG_LTO_CLANG_FULL=y/CONFIG_LTO_CLANG_FULL=n/g' $DEFCONFIG || true
 
-          echo "CONFIG_LTO_NONE=y" >> $DEFCONFIG
+          grep -q CONFIG_LTO_NONE $DEFCONFIG || echo "CONFIG_LTO_NONE=y" >> $DEFCONFIG
 
       # ===============================
       # DEFCONFIG
@@ -78,29 +73,9 @@ jobs:
           make O=out vendor/x55_defconfig
 
       # ===============================
-      # BUILD (SEM HDRINST / SEM OOM)
+      # BUILD (HDRINST BLOQUEADO)
       # ===============================
-      - name: Build kernel Image
+      - name: Build kernel Image ONLY
         working-directory: Kernel/kernel_platform/msm-kernel
         run: |
-          make -j$(nproc --ignore=1) \
-            O=out \
-            CC="ccache clang" \
-            LD=ld.lld \
-            Image
-
-      # ===============================
-      # VERIFICAÇÃO
-      # ===============================
-      - name: Verify Image
-        run: |
-          ls -lh Kernel/kernel_platform/msm-kernel/out/arch/arm64/boot/Image
-
-      # ===============================
-      # UPLOAD
-      # ===============================
-      - name: Upload kernel Image
-        uses: actions/upload-artifact@v4
-        with:
-          name: SM-M556B-Image
-          path: Kernel/kernel_platform/msm-kernel/out/arch/arm64/boot/Image
+          make -j$(n

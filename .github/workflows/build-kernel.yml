@@ -1,4 +1,4 @@
-name: Build SM-M556B Kernel (No LTO / No HDRINST)
+name: Build SM-M556B Kernel (Samsung • No LTO • AOSP Clang)
 
 on:
   workflow_dispatch:
@@ -7,58 +7,81 @@ jobs:
   build:
     runs-on: ubuntu-22.04
 
+    env:
+      BUILD_TARGET: m55xq_swa_open
+      CHIPSET_NAME: x55
+      TARGET_PRODUCT: gki
+      ARCH: arm64
+      SUBARCH: arm64
+      IS_KBUILD: true
+
     steps:
-      - name: Checkout kernel source (with LFS)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          lfs: true
+    - name: Checkout kernel source (with LFS)
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        lfs: true
+        submodules: recursive
 
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y \
-            git git-lfs bc bison flex \
-            libssl-dev libelf-dev \
-            build-essential \
-            python3 \
-            ccache
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          git git-lfs \
+          bc bison flex \
+          libssl-dev libelf-dev \
+          build-essential \
+          python3 \
+          ccache \
+          zip unzip curl
 
-      - name: Init Git LFS
-        run: |
-          git lfs install
-          git lfs pull
+    - name: Init Git LFS
+      run: |
+        git lfs install
+        git lfs pull
 
-      - name: Setup environment
-        run: |
-          echo "ARCH=arm64" >> $GITHUB_ENV
-          echo "SUBARCH=arm64" >> $GITHUB_ENV
-          echo "LLVM=1" >> $GITHUB_ENV
-          echo "LLVM_IAS=1" >> $GITHUB_ENV
+    # 🔥 AQUI ESTÁ A CORREÇÃO DO ERRO ld.lld
+    - name: Setup AOSP Clang toolchain (from source)
+      run: |
+        CLANG_DIR=$(pwd)/Kernel/kernel_platform/prebuilts-master/clang/host/linux-x86
+        CLANG_BIN=$(ls $CLANG_DIR/clang-*/bin | head -n 1 | xargs dirname)
 
-      - name: Disable LTO (Vega method)
-        run: |
-          DEFCONFIG=Kernel/kernel_platform/msm-kernel/arch/arm64/configs/vendor/x55_defconfig
-          sed -i 's/^CONFIG_LTO=y/CONFIG_LTO=n/' $DEFCONFIG || true
-          sed -i 's/^CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/' $DEFCONFIG || true
-          sed -i 's/^CONFIG_LTO_CLANG_THIN=y/CONFIG_LTO_CLANG_THIN=n/' $DEFCONFIG || true
-          sed -i 's/^CONFIG_LTO_CLANG_FULL=y/CONFIG_LTO_CLANG_FULL=n/' $DEFCONFIG || true
+        echo "PATH=$CLANG_BIN:$PATH" >> $GITHUB_ENV
+        echo "CC=clang" >> $GITHUB_ENV
+        echo "LD=ld.lld" >> $GITHUB_ENV
+        echo "LLVM=1" >> $GITHUB_ENV
+        echo "LLVM_IAS=1" >> $GITHUB_ENV
 
-      - name: Kernel defconfig
-        working-directory: Kernel/kernel_platform/msm-kernel
-        run: |
-          make O=out vendor/x55_defconfig
+    - name: Disable LTO (Vega method)
+      run: |
+        DEFCONFIG=Kernel/kernel_platform/msm-kernel/arch/arm64/configs/vendor/x55_defconfig
+        sed -i 's/^CONFIG_LTO=y/CONFIG_LTO=n/' $DEFCONFIG || true
+        sed -i 's/^CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/' $DEFCONFIG || true
+        sed -i 's/^CONFIG_LTO_CLANG_THIN=y/CONFIG_LTO_CLANG_THIN=n/' $DEFCONFIG || true
+        sed -i 's/^CONFIG_LTO_CLANG_FULL=y/CONFIG_LTO_CLANG_FULL=n/' $DEFCONFIG || true
 
-      - name: Build kernel Image (NO HDRINST / NO LTO)
-        working-directory: Kernel/kernel_platform/msm-kernel
-        run: |
-          make -j$(nproc) \
-            O=out \
-            CC=clang \
-            Image
+    # ⚠️ PASSO OBRIGATÓRIO EM KERNEL SAMSUNG
+    - name: Prepare Samsung vendor build
+      run: |
+        cd Kernel/kernel_platform
+        RECOMPILE_KERNEL=1 \
+        ./build/android/prepare_vendor.sh \
+        $CHIPSET_NAME $TARGET_PRODUCT gki
 
-      - name: Upload kernel Image
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-Image
-          path: Kernel/kernel_platform/msm-kernel/out/arch/arm64/boot/Image
+    - name: Kernel defconfig
+      run: |
+        cd Kernel/kernel_platform/msm-kernel
+        make O=../../out vendor/x55_defconfig
+
+    - name: Build kernel Image (NO LTO / NO HDRINST)
+      run: |
+        cd Kernel/kernel_platform/msm-kernel
+        make -j$(nproc) \
+          O=../../out \
+          Image
+
+    - name: Upload kernel Image
+      uses: actions/upload-artifact@v4
+      with:
+        name: SM-M556B-Kernel-Image
+        path: Kernel/kernel_platform/out/arch/arm64/boot/Image

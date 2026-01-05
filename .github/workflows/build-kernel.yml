@@ -1,4 +1,4 @@
-name: Build SM-M556B Samsung GKI Kernel
+name: Build SM-M556B Kernel (Auto Detect)
 
 on:
   workflow_dispatch:
@@ -10,7 +10,6 @@ jobs:
     env:
       BUILD_TARGET: m55xq_swa_open
       CHIPSET_NAME: x55
-      TARGET_PRODUCT: gki
 
     steps:
     - name: Checkout repository
@@ -27,36 +26,73 @@ jobs:
     - name: Setup Clang toolchain (AOSP)
       run: |
         mkdir -p prebuilts/clang
-        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r522817.tar.gz
+        wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r522817.tar.gz
         tar -xzf clang-r522817.tar.gz -C prebuilts/clang
         echo "$PWD/prebuilts/clang/bin" >> $GITHUB_PATH
 
-    - name: Export Samsung build variables
+    - name: Export Samsung variables
       run: |
         echo "MODEL=$(echo $BUILD_TARGET | cut -d'_' -f1)" >> $GITHUB_ENV
         echo "PROJECT_NAME=$(echo $BUILD_TARGET | cut -d'_' -f1)" >> $GITHUB_ENV
         echo "REGION=$(echo $BUILD_TARGET | cut -d'_' -f2)" >> $GITHUB_ENV
         echo "CARRIER=$(echo $BUILD_TARGET | cut -d'_' -f3)" >> $GITHUB_ENV
         echo "ANDROID_BUILD_TOP=$PWD" >> $GITHUB_ENV
-        echo "TARGET_BOARD_PLATFORM=gki" >> $GITHUB_ENV
         echo "TARGET_PRODUCT=gki" >> $GITHUB_ENV
+        echo "TARGET_BOARD_PLATFORM=gki" >> $GITHUB_ENV
         echo "IS_KBUILD=true" >> $GITHUB_ENV
-        echo "OUT_DIR=$PWD/out/msm-$CHIPSET_NAME-$CHIPSET_NAME-gki" >> $GITHUB_ENV
+        echo "OUT_DIR=$PWD/out" >> $GITHUB_ENV
 
-    - name: Build Samsung GKI Kernel (official way)
+    - name: Detect kernel layout
       run: |
-        cd kernel_platform
+        echo "🔍 Detectando estrutura do repositório..."
+        if [ -d "kernel_platform/build/android" ]; then
+          echo "KERNEL_MODE=samsung" >> $GITHUB_ENV
+          echo "KERNEL_PATH=kernel_platform" >> $GITHUB_ENV
+          echo "✅ Kernel Samsung completo detectado"
+        elif [ -d "Kernel/kernel_platform/build/android" ]; then
+          echo "KERNEL_MODE=samsung" >> $GITHUB_ENV
+          echo "KERNEL_PATH=Kernel/kernel_platform" >> $GITHUB_ENV
+          echo "✅ Kernel Samsung completo detectado (subdir Kernel/)"
+        elif [ -d "kernel_platform/common" ]; then
+          echo "KERNEL_MODE=common" >> $GITHUB_ENV
+          echo "KERNEL_PATH=kernel_platform/common" >> $GITHUB_ENV
+          echo "⚠️ Apenas common/ detectado"
+        elif [ -d "common" ]; then
+          echo "KERNEL_MODE=common" >> $GITHUB_ENV
+          echo "KERNEL_PATH=common" >> $GITHUB_ENV
+          echo "⚠️ Apenas common/ detectado"
+        else
+          echo "❌ Nenhuma estrutura de kernel válida encontrada"
+          echo "📁 Conteúdo do repo:"
+          find . -maxdepth 3 -type d
+          exit 1
+        fi
+
+    - name: Build Samsung kernel (official script)
+      if: env.KERNEL_MODE == 'samsung'
+      run: |
+        cd $KERNEL_PATH
         chmod +x build/android/prepare_vendor.sh
         RECOMPILE_KERNEL=1 \
         build/android/prepare_vendor.sh $CHIPSET_NAME gki gki
 
-    - name: Package kernel output
+    - name: Build common kernel (fallback)
+      if: env.KERNEL_MODE == 'common'
       run: |
-        cd out
-        zip -r SM-M556B_GKI_kernel.zip msm-$CHIPSET_NAME-$CHIPSET_NAME-gki
+        cd $KERNEL_PATH
+        make O=out gki_defconfig
+        make -j$(nproc) O=out ARCH=arm64 LLVM=1
+
+    - name: Package output
+      run: |
+        mkdir -p artifacts
+        if [ -d "out" ]; then
+          cp -r out artifacts/
+        fi
+        zip -r SM-M556B_kernel_build.zip artifacts
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: SM-M556B_GKI_kernel
-        path: out/SM-M556B_GKI_kernel.zip
+        name: SM-M556B_kernel_build
+        path: SM-M556B_kernel_build.zip

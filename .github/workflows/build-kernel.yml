@@ -1,4 +1,4 @@
-name: Build Kernel SM-M556B (KernelSU Next)
+name: Build SM-M556B Kernel (Safe / No LTO / No Submodules)
 
 on:
   workflow_dispatch:
@@ -10,91 +10,97 @@ jobs:
     env:
       ARCH: arm64
       SUBARCH: arm64
-      CLANG_PATH: clang
-      CC: clang
-      CROSS_COMPILE: aarch64-linux-gnu-
-      CROSS_COMPILE_ARM32: arm-linux-gnueabi-
+      LLVM: 1
+      LLVM_IAS: 1
+      ANDROID_BUILD_TOP: ${{ github.workspace }}
 
     steps:
-    - name: Checkout Kernel Source
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        fetch-depth: 0
+      # ===============================
+      # CHECKOUT (SEM SUBMODULES)
+      # ===============================
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
 
-    - name: Setup Swap (IMPORTANT)
-      run: |
-        sudo fallocate -l 12G /swapfile
-        sudo chmod 600 /swapfile
-        sudo mkswap /swapfile
-        sudo swapon /swapfile
-        free -h
+      # ===============================
+      # DEPENDÊNCIAS
+      # ===============================
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            bc bison flex git git-lfs \
+            libssl-dev libelf-dev \
+            build-essential \
+            python3 \
+            ccache \
+            clang lld
 
-    - name: Install Dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y \
-          bc bison build-essential \
-          clang flex git \
-          libssl-dev \
-          llvm lld \
-          python3 \
-          cpio \
-          unzip \
-          rsync
+      # ===============================
+      # LIMPAR SUBMODULES (FIX SAMSUNG)
+      # ===============================
+      - name: Disable Samsung submodules
+        run: |
+          rm -f .gitmodules || true
+          git config --remove-section submodule || true
 
-    - name: Setup Clang Toolchain
-      run: |
-        git clone --depth=1 https://github.com/llvm/llvm-project.git clang
-        echo "PATH=$PWD/clang/build/bin:$PATH" >> $GITHUB_ENV
+      # ===============================
+      # SETUP CCACHE (REDUZ OOM)
+      # ===============================
+      - name: Setup ccache
+        run: |
+          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+          echo "CCACHE_COMPRESS=1" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=2G" >> $GITHUB_ENV
 
-    - name: Clone KernelSU Next
-      run: |
-        git clone https://github.com/KernelSU-Next/KernelSU-Next.git
-        cd KernelSU-Next
-        export KERNELSU_NEXT=1
-        ./kernel/setup.sh
+      # ===============================
+      # DESATIVAR LTO (FORÇADO)
+      # ===============================
+      - name: Force disable LTO (Vega method)
+        run: |
+          DEFCONFIG=Kernel/kernel_platform/msm-kernel/arch/arm64/configs/vendor/x55_defconfig
 
-    - name: Kernel Config
-      run: |
-        cd Kernel/kernel_platform/common
-        make O=out vendor/gki_defconfig
+          sed -i 's/CONFIG_LTO=y/CONFIG_LTO=n/g' $DEFCONFIG || true
+          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/g' $DEFCONFIG || true
+          sed -i 's/CONFIG_LTO_CLANG_THIN=y/CONFIG_LTO_CLANG_THIN=n/g' $DEFCONFIG || true
+          sed -i 's/CONFIG_LTO_CLANG_FULL=y/CONFIG_LTO_CLANG_FULL=n/g' $DEFCONFIG || true
 
-        # 🔥 DESATIVA LTO (causa do crash)
-        scripts/config --file out/.config \
-          -d LTO \
-          -d LTO_CLANG \
-          -d THINLTO
+          echo "CONFIG_LTO_NONE=y" >> $DEFCONFIG
 
-        # KernelSU
-        scripts/config --file out/.config \
-          -e CONFIG_KSU \
-          -e CONFIG_KSU_SUSFS
+      # ===============================
+      # DEFCONFIG
+      # ===============================
+      - name: Kernel defconfig
+        working-directory: Kernel/kernel_platform/msm-kernel
+        run: |
+          make O=out vendor/x55_defconfig
 
-        make O=out olddefconfig
+      # ===============================
+      # BUILD (SEM HDRINST / SEM OOM)
+      # ===============================
+      - name: Build kernel Image
+        working-directory: Kernel/kernel_platform/msm-kernel
+        run: |
+          make -j$(nproc --ignore=1) \
+            O=out \
+            CC="ccache clang" \
+            LD=ld.lld \
+            Image
 
-    - name: Build Kernel
-      run: |
-        cd Kernel/kernel_platform/common
-        make O=out \
-          CC=clang \
-          LD=ld.lld \
-          LLVM=1 \
-          LLVM_IAS=1 \
-          -j2
+      # ===============================
+      # VERIFICAÇÃO
+      # ===============================
+      - name: Verify Image
+        run: |
+          ls -lh Kernel/kernel_platform/msm-kernel/out/arch/arm64/boot/Image
 
-    - name: Clone AnyKernel3
-      run: |
-        git clone https://github.com/osm0sis/AnyKernel3.git
-
-    - name: Package Kernel (AnyKernel3)
-      run: |
-        cp Kernel/kernel_platform/common/out/arch/arm64/boot/Image AnyKernel3/
-        cd AnyKernel3
-        zip -r9 KernelSU-M556B.zip ./*
-
-    - name: Upload Kernel
-      uses: actions/upload-artifact@v4
-      with:
-        name: KernelSU-M556B
-        path: AnyKernel3/KernelSU-M556B.zip
+      # ===============================
+      # UPLOAD
+      # ===============================
+      - name: Upload kernel Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: SM-M556B-Image
+          path: Kernel/kernel_platform/msm-kernel/out/arch/arm64/boot/Image

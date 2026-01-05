@@ -1,4 +1,4 @@
-name: Build SM-M556B Kernel (Samsung | Stable | No LTO)
+name: Build Kernel SM-M556B (KernelSU Next)
 
 on:
   workflow_dispatch:
@@ -8,120 +8,93 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-      BUILD_TARGET: m55xq_swa_open
-      CHIPSET_NAME: x55
-      TARGET_PRODUCT: gki
-      TARGET_BOARD_PLATFORM: gki
       ARCH: arm64
       SUBARCH: arm64
-      IS_KBUILD: true
+      CLANG_PATH: clang
+      CC: clang
+      CROSS_COMPILE: aarch64-linux-gnu-
+      CROSS_COMPILE_ARM32: arm-linux-gnueabi-
 
     steps:
-    - name: Checkout kernel source (with LFS)
+    - name: Checkout Kernel Source
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0
-        lfs: true
         submodules: recursive
+        fetch-depth: 0
 
-    - name: Install dependencies
+    - name: Setup Swap (IMPORTANT)
+      run: |
+        sudo fallocate -l 12G /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+        free -h
+
+    - name: Install Dependencies
       run: |
         sudo apt update
         sudo apt install -y \
-          git git-lfs \
-          bc bison flex \
-          libssl-dev libelf-dev \
-          build-essential \
+          bc bison build-essential \
+          clang flex git \
+          libssl-dev \
+          llvm lld \
           python3 \
-          ccache \
-          zip unzip curl \
+          cpio \
+          unzip \
           rsync
 
-    - name: Init Git LFS
+    - name: Setup Clang Toolchain
       run: |
-        git lfs install
-        git lfs pull
+        git clone --depth=1 https://github.com/llvm/llvm-project.git clang
+        echo "PATH=$PWD/clang/build/bin:$PATH" >> $GITHUB_ENV
 
-    # ------------------------------------------------
-    # ANDROID ENV (SEM LUNCH, CI FRIENDLY)
-    # ------------------------------------------------
-    - name: Setup Android build environment
+    - name: Clone KernelSU Next
       run: |
-        echo "ANDROID_BUILD_TOP=$(pwd)" >> $GITHUB_ENV
-        echo "ARCH=arm64" >> $GITHUB_ENV
-        echo "SUBARCH=arm64" >> $GITHUB_ENV
-        echo "LLVM=1" >> $GITHUB_ENV
-        echo "LLVM_IAS=1" >> $GITHUB_ENV
-        echo "IS_KBUILD=true" >> $GITHUB_ENV
-        echo "TARGET_PRODUCT=gki" >> $GITHUB_ENV
-        echo "TARGET_BOARD_PLATFORM=gki" >> $GITHUB_ENV
+        git clone https://github.com/KernelSU-Next/KernelSU-Next.git
+        cd KernelSU-Next
+        export KERNELSU_NEXT=1
+        ./kernel/setup.sh
 
-    # ------------------------------------------------
-    # AOSP CLANG (RESOLVE ld.lld DEFINITIVAMENTE)
-    # ------------------------------------------------
-    - name: Setup AOSP Clang toolchain (from source)
+    - name: Kernel Config
       run: |
-        CLANG_BASE=$(pwd)/Kernel/kernel_platform/prebuilts-master/clang/host/linux-x86
-        CLANG_BIN=$(ls $CLANG_BASE/clang-*/bin | head -n 1 | xargs dirname)
+        cd Kernel/kernel_platform/common
+        make O=out vendor/gki_defconfig
 
-        echo "PATH=$CLANG_BIN:$PATH" >> $GITHUB_ENV
-        echo "CC=clang" >> $GITHUB_ENV
-        echo "LD=ld.lld" >> $GITHUB_ENV
-        echo "AR=llvm-ar" >> $GITHUB_ENV
-        echo "NM=llvm-nm" >> $GITHUB_ENV
-        echo "OBJCOPY=llvm-objcopy" >> $GITHUB_ENV
-        echo "OBJDUMP=llvm-objdump" >> $GITHUB_ENV
-        echo "STRIP=llvm-strip" >> $GITHUB_ENV
+        # 🔥 DESATIVA LTO (causa do crash)
+        scripts/config --file out/.config \
+          -d LTO \
+          -d LTO_CLANG \
+          -d THINLTO
 
-    # ------------------------------------------------
-    # DESABILITAR LTO (MÉTODO VEGA + FALLBACK)
-    # ------------------------------------------------
-    - name: Disable LTO completely
+        # KernelSU
+        scripts/config --file out/.config \
+          -e CONFIG_KSU \
+          -e CONFIG_KSU_SUSFS
+
+        make O=out olddefconfig
+
+    - name: Build Kernel
       run: |
-        DEFCONFIG=Kernel/kernel_platform/msm-kernel/arch/arm64/configs/vendor/x55_defconfig
+        cd Kernel/kernel_platform/common
+        make O=out \
+          CC=clang \
+          LD=ld.lld \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          -j2
 
-        sed -i 's/^CONFIG_LTO=y/CONFIG_LTO=n/' $DEFCONFIG || true
-        sed -i 's/^CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/' $DEFCONFIG || true
-        sed -i 's/^CONFIG_LTO_CLANG_THIN=y/CONFIG_LTO_CLANG_THIN=n/' $DEFCONFIG || true
-        sed -i 's/^CONFIG_LTO_CLANG_FULL=y/CONFIG_LTO_CLANG_FULL=n/' $DEFCONFIG || true
-
-        echo "CONFIG_LTO=n" >> $DEFCONFIG
-        echo "CONFIG_LTO_CLANG=n" >> $DEFCONFIG
-        echo "CONFIG_THINLTO=n" >> $DEFCONFIG
-
-    # ------------------------------------------------
-    # SAMSUNG VENDOR PREP (OBRIGATÓRIO)
-    # ------------------------------------------------
-    - name: Prepare Samsung vendor build
+    - name: Clone AnyKernel3
       run: |
-        cd Kernel/kernel_platform
-        RECOMPILE_KERNEL=1 \
-        ./build/android/prepare_vendor.sh \
-        $CHIPSET_NAME $TARGET_PRODUCT gki
+        git clone https://github.com/osm0sis/AnyKernel3.git
 
-    # ------------------------------------------------
-    # DEFCONFIG
-    # ------------------------------------------------
-    - name: Kernel defconfig
+    - name: Package Kernel (AnyKernel3)
       run: |
-        cd Kernel/kernel_platform/msm-kernel
-        make O=../../out vendor/x55_defconfig
+        cp Kernel/kernel_platform/common/out/arch/arm64/boot/Image AnyKernel3/
+        cd AnyKernel3
+        zip -r9 KernelSU-M556B.zip ./*
 
-    # ------------------------------------------------
-    # BUILD (SEM HDRINST / SEM HEADERS)
-    # ------------------------------------------------
-    - name: Build kernel Image
-      run: |
-        cd Kernel/kernel_platform/msm-kernel
-        make -j$(nproc) \
-          O=../../out \
-          Image
-
-    # ------------------------------------------------
-    # UPLOAD
-    # ------------------------------------------------
-    - name: Upload kernel Image
+    - name: Upload Kernel
       uses: actions/upload-artifact@v4
       with:
-        name: SM-M556B-Kernel-Image
-        path: Kernel/kernel_platform/out/arch/arm64/boot/Image
+        name: KernelSU-M556B
+        path: AnyKernel3/KernelSU-M556B.zip

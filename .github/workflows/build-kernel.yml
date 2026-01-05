@@ -1,4 +1,4 @@
-name: Build SM-M556B Stock Kernel
+name: Build SM-M556B Samsung GKI Kernel
 
 on:
   workflow_dispatch:
@@ -6,47 +6,57 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     env:
-      O: out
+      BUILD_TARGET: m55xq_swa_open
+      CHIPSET_NAME: x55
+      TARGET_PRODUCT: gki
 
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-    - name: Setup dependencies
+    - name: Install dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential libncurses-dev bison flex libssl-dev bc curl wget unzip cpio python3 python3-venv python3-pip git
+        sudo apt update
+        sudo apt install -y \
+          bc bison build-essential cpio flex git \
+          libncurses-dev libssl-dev python3 \
+          unzip wget rsync
 
-    - name: Setup Linaro Toolchain
+    - name: Setup Clang toolchain (AOSP)
       run: |
-        mkdir -p prebuilts
-        wget -qO- https://releases.linaro.org/components/toolchain/binaries/latest-7/aarch64-linux-gnu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz | tar -xJ -C prebuilts
-        export PATH=$PWD/prebuilts/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/bin:$PATH
+        mkdir -p prebuilts/clang
+        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r522817.tar.gz
+        tar -xzf clang-r522817.tar.gz -C prebuilts/clang
+        echo "$PWD/prebuilts/clang/bin" >> $GITHUB_PATH
 
-    - name: Prepare build directories
+    - name: Export Samsung build variables
       run: |
-        cd Kernel/kernel_platform/common
-        mkdir -p $O/usr/include/asm
-        mkdir -p $O/include
+        echo "MODEL=$(echo $BUILD_TARGET | cut -d'_' -f1)" >> $GITHUB_ENV
+        echo "PROJECT_NAME=$(echo $BUILD_TARGET | cut -d'_' -f1)" >> $GITHUB_ENV
+        echo "REGION=$(echo $BUILD_TARGET | cut -d'_' -f2)" >> $GITHUB_ENV
+        echo "CARRIER=$(echo $BUILD_TARGET | cut -d'_' -f3)" >> $GITHUB_ENV
+        echo "ANDROID_BUILD_TOP=$PWD" >> $GITHUB_ENV
+        echo "TARGET_BOARD_PLATFORM=gki" >> $GITHUB_ENV
+        echo "TARGET_PRODUCT=gki" >> $GITHUB_ENV
+        echo "IS_KBUILD=true" >> $GITHUB_ENV
+        echo "OUT_DIR=$PWD/out/msm-$CHIPSET_NAME-$CHIPSET_NAME-gki" >> $GITHUB_ENV
 
-    - name: Configure kernel
+    - name: Build Samsung GKI Kernel (official way)
       run: |
-        cd Kernel/kernel_platform/common
-        make O=$O gki_defconfig
+        cd kernel_platform
+        chmod +x build/android/prepare_vendor.sh
+        RECOMPILE_KERNEL=1 \
+        build/android/prepare_vendor.sh $CHIPSET_NAME gki gki
 
-    - name: Compile kernel
+    - name: Package kernel output
       run: |
-        cd Kernel/kernel_platform/common
-        make -j$(nproc) O=$O ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- HDRINST=$O/usr/include
+        cd out
+        zip -r SM-M556B_GKI_kernel.zip msm-$CHIPSET_NAME-$CHIPSET_NAME-gki
 
-    - name: Package kernel
-      run: |
-        cd Kernel/kernel_platform/common/$O
-        zip -r ../../../../SM-M556B_14_kernel_build.zip *
-
-    - name: Upload kernel zip
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: SM-M556B_14_kernel_build
-        path: Kernel/kernel_platform/common/SM-M556B_14_kernel_build.zip
+        name: SM-M556B_GKI_kernel
+        path: out/SM-M556B_GKI_kernel.zip

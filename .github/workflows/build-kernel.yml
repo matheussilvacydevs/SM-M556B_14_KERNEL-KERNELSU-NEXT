@@ -1,4 +1,4 @@
-name: Build SM-M556B Samsung Kernel (Full Auto)
+name: Build SM-M556B Samsung Kernel (No LTO)
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ jobs:
       CHIPSET_NAME: x55
 
     steps:
-    # 1️⃣ Checkout
+    # 1️⃣ Checkout (com LFS)
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
@@ -46,19 +46,15 @@ jobs:
         echo "TARGET_BOARD_PLATFORM=gki" >> $GITHUB_ENV
         echo "IS_KBUILD=true" >> $GITHUB_ENV
 
-    # 5️⃣ Detectar estrutura real do kernel
+    # 5️⃣ Detectar estrutura do kernel
     - name: Detect kernel structure
       run: |
-        echo "🔍 Detectando layout..."
         if [ -d "Kernel/kernel_platform/build/android" ]; then
           echo "KERNEL_PATH=Kernel/kernel_platform" >> $GITHUB_ENV
-          echo "KERNEL_MODE=samsung" >> $GITHUB_ENV
         elif [ -d "kernel_platform/build/android" ]; then
           echo "KERNEL_PATH=kernel_platform" >> $GITHUB_ENV
-          echo "KERNEL_MODE=samsung" >> $GITHUB_ENV
         else
           echo "❌ kernel_platform/build/android não encontrado"
-          echo "📁 Estrutura do repo:"
           find . -maxdepth 4 -type d
           exit 1
         fi
@@ -66,23 +62,32 @@ jobs:
     # 6️⃣ Usar clang do próprio repo (Samsung)
     - name: Setup Samsung clang
       run: |
-        CLANG_DIR=$(find $KERNEL_PATH -path "*clang*/bin/clang" | head -n 1 | xargs dirname)
-        if [ -z "$CLANG_DIR" ]; then
-          echo "❌ Clang não encontrado no repo"
+        CLANG_BIN=$(find $KERNEL_PATH -path "*clang*/bin/clang" | head -n 1)
+        if [ -z "$CLANG_BIN" ]; then
+          echo "❌ clang não encontrado no repo"
           exit 1
         fi
-        echo "Found clang at: $CLANG_DIR"
-        echo "$CLANG_DIR" >> $GITHUB_PATH
+        echo "Clang encontrado em: $CLANG_BIN"
+        echo "$(dirname $CLANG_BIN)" >> $GITHUB_PATH
 
-    # 7️⃣ Build kernel (OFICIAL)
-    - name: Build Samsung GKI kernel
+    # 7️⃣ Build kernel (LTO OFF + low memory)
+    - name: Build Samsung GKI kernel (NO LTO)
       run: |
         cd $KERNEL_PATH
         chmod +x build/android/prepare_vendor.sh
+
+        export LLVM=1
+        export LLVM_IAS=1
+        export LLVM_LTO=none
+        export KCFLAGS="-Wno-error"
+        export KBUILD_BUILD_USER=ci
+        export KBUILD_BUILD_HOST=github
+
         RECOMPILE_KERNEL=1 \
+        MAKEFLAGS="-j2" \
         build/android/prepare_vendor.sh $CHIPSET_NAME gki gki
 
-    # 8️⃣ Empacotar
+    # 8️⃣ Empacotar saída
     - name: Package kernel output
       run: |
         mkdir -p artifacts

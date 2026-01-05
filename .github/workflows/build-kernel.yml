@@ -1,4 +1,4 @@
-name: Build Kernel SM-M556B (No LTO)
+name: Build SM-M556B Kernel (No LTO / No HDRINST)
 
 on:
   workflow_dispatch:
@@ -8,63 +8,57 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout source
+      - name: Checkout kernel source (with LFS)
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
 
       - name: Install dependencies
         run: |
           sudo apt update
           sudo apt install -y \
-            bc bison build-essential curl flex git gnupg \
-            gperf libncurses-dev libssl-dev python3 \
-            zip unzip zstd
+            git git-lfs bc bison flex \
+            libssl-dev libelf-dev \
+            build-essential \
+            python3 \
+            ccache
 
-      - name: Setup Clang
+      - name: Init Git LFS
         run: |
-          mkdir -p $HOME/clang
-          curl -L https://github.com/llvm/llvm-project/releases/download/llvmorg-17.0.6/clang+llvm-17.0.6-x86_64-linux-gnu-ubuntu-22.04.tar.xz \
-          | tar -xJ --strip-components=1 -C $HOME/clang
-          echo "$HOME/clang/bin" >> $GITHUB_PATH
+          git lfs install
+          git lfs pull
 
-      - name: Export build vars
+      - name: Setup environment
         run: |
           echo "ARCH=arm64" >> $GITHUB_ENV
           echo "SUBARCH=arm64" >> $GITHUB_ENV
-          echo "CC=clang" >> $GITHUB_ENV
-          echo "LD=ld.lld" >> $GITHUB_ENV
           echo "LLVM=1" >> $GITHUB_ENV
           echo "LLVM_IAS=1" >> $GITHUB_ENV
 
-      - name: Disable LTO (forced)
+      - name: Disable LTO (Vega method)
         run: |
           DEFCONFIG=Kernel/kernel_platform/msm-kernel/arch/arm64/configs/vendor/x55_defconfig
-
-          echo ">> Before:"
-          grep CONFIG_LTO $DEFCONFIG || true
-
-          sed -i 's/^CONFIG_LTO=y/CONFIG_LTO=n/' $DEFCONFIG
-          sed -i 's/^CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/' $DEFCONFIG
-          sed -i 's/^CONFIG_LTO_CLANG_FULL=y/CONFIG_LTO_CLANG_FULL=n/' $DEFCONFIG
-          sed -i 's/^CONFIG_THINLTO=y/CONFIG_THINLTO=n/' $DEFCONFIG
-
-          echo ">> After:"
-          grep CONFIG_LTO $DEFCONFIG || true
+          sed -i 's/^CONFIG_LTO=y/CONFIG_LTO=n/' $DEFCONFIG || true
+          sed -i 's/^CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/' $DEFCONFIG || true
+          sed -i 's/^CONFIG_LTO_CLANG_THIN=y/CONFIG_LTO_CLANG_THIN=n/' $DEFCONFIG || true
+          sed -i 's/^CONFIG_LTO_CLANG_FULL=y/CONFIG_LTO_CLANG_FULL=n/' $DEFCONFIG || true
 
       - name: Kernel defconfig
         working-directory: Kernel/kernel_platform/msm-kernel
         run: |
-          make vendor/x55_defconfig
+          make O=out vendor/x55_defconfig
 
-      - name: Build kernel
+      - name: Build kernel Image (NO HDRINST / NO LTO)
         working-directory: Kernel/kernel_platform/msm-kernel
         run: |
-          make -j$(nproc)
+          make -j$(nproc) \
+            O=out \
+            CC=clang \
+            Image
 
-      - name: Upload Image
+      - name: Upload kernel Image
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-image
-          path: |
-            Kernel/kernel_platform/msm-kernel/arch/arm64/boot/Image
-            Kernel/kernel_platform/msm-kernel/arch/arm64/boot/Image.gz
-            Kernel/kernel_platform/msm-kernel/arch/arm64/boot/Image.lz4
+          name: kernel-Image
+          path: Kernel/kernel_platform/msm-kernel/out/arch/arm64/boot/Image

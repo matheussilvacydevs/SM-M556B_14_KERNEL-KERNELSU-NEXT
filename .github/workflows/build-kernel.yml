@@ -1,102 +1,70 @@
-name: Build SM-M556B Samsung Kernel (No LTO)
+name: Build Kernel SM-M556B (No LTO)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-
-    env:
-      BUILD_TARGET: m55xq_swa_open
-      CHIPSET_NAME: x55
+    runs-on: ubuntu-22.04
 
     steps:
-    # 1️⃣ Checkout (com LFS)
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        lfs: true
+      - name: Checkout source
+        uses: actions/checkout@v4
 
-    # 2️⃣ Git LFS (CRÍTICO)
-    - name: Setup Git LFS
-      run: |
-        sudo apt update
-        sudo apt install -y git-lfs
-        git lfs install
-        git lfs pull
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            bc bison build-essential curl flex git gnupg \
+            gperf libncurses-dev libssl-dev python3 \
+            zip unzip zstd
 
-    # 3️⃣ Dependências
-    - name: Install build dependencies
-      run: |
-        sudo apt install -y \
-          bc bison build-essential cpio flex git \
-          libncurses-dev libssl-dev python3 \
-          unzip wget rsync
+      - name: Setup Clang
+        run: |
+          mkdir -p $HOME/clang
+          curl -L https://github.com/llvm/llvm-project/releases/download/llvmorg-17.0.6/clang+llvm-17.0.6-x86_64-linux-gnu-ubuntu-22.04.tar.xz \
+          | tar -xJ --strip-components=1 -C $HOME/clang
+          echo "$HOME/clang/bin" >> $GITHUB_PATH
 
-    # 4️⃣ Export variáveis Samsung
-    - name: Export Samsung build variables
-      run: |
-        echo "MODEL=$(echo $BUILD_TARGET | cut -d'_' -f1)" >> $GITHUB_ENV
-        echo "PROJECT_NAME=$(echo $BUILD_TARGET | cut -d'_' -f1)" >> $GITHUB_ENV
-        echo "REGION=$(echo $BUILD_TARGET | cut -d'_' -f2)" >> $GITHUB_ENV
-        echo "CARRIER=$(echo $BUILD_TARGET | cut -d'_' -f3)" >> $GITHUB_ENV
-        echo "ANDROID_BUILD_TOP=$PWD" >> $GITHUB_ENV
-        echo "TARGET_PRODUCT=gki" >> $GITHUB_ENV
-        echo "TARGET_BOARD_PLATFORM=gki" >> $GITHUB_ENV
-        echo "IS_KBUILD=true" >> $GITHUB_ENV
+      - name: Export build vars
+        run: |
+          echo "ARCH=arm64" >> $GITHUB_ENV
+          echo "SUBARCH=arm64" >> $GITHUB_ENV
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "LD=ld.lld" >> $GITHUB_ENV
+          echo "LLVM=1" >> $GITHUB_ENV
+          echo "LLVM_IAS=1" >> $GITHUB_ENV
 
-    # 5️⃣ Detectar estrutura do kernel
-    - name: Detect kernel structure
-      run: |
-        if [ -d "Kernel/kernel_platform/build/android" ]; then
-          echo "KERNEL_PATH=Kernel/kernel_platform" >> $GITHUB_ENV
-        elif [ -d "kernel_platform/build/android" ]; then
-          echo "KERNEL_PATH=kernel_platform" >> $GITHUB_ENV
-        else
-          echo "❌ kernel_platform/build/android não encontrado"
-          find . -maxdepth 4 -type d
-          exit 1
-        fi
+      - name: Disable LTO (forced)
+        run: |
+          DEFCONFIG=Kernel/kernel_platform/msm-kernel/arch/arm64/configs/vendor/x55_defconfig
 
-    # 6️⃣ Usar clang do próprio repo (Samsung)
-    - name: Setup Samsung clang
-      run: |
-        CLANG_BIN=$(find $KERNEL_PATH -path "*clang*/bin/clang" | head -n 1)
-        if [ -z "$CLANG_BIN" ]; then
-          echo "❌ clang não encontrado no repo"
-          exit 1
-        fi
-        echo "Clang encontrado em: $CLANG_BIN"
-        echo "$(dirname $CLANG_BIN)" >> $GITHUB_PATH
+          echo ">> Before:"
+          grep CONFIG_LTO $DEFCONFIG || true
 
-    # 7️⃣ Build kernel (LTO OFF + low memory)
-    - name: Build Samsung GKI kernel (NO LTO)
-      run: |
-        cd $KERNEL_PATH
-        chmod +x build/android/prepare_vendor.sh
+          sed -i 's/^CONFIG_LTO=y/CONFIG_LTO=n/' $DEFCONFIG
+          sed -i 's/^CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/' $DEFCONFIG
+          sed -i 's/^CONFIG_LTO_CLANG_FULL=y/CONFIG_LTO_CLANG_FULL=n/' $DEFCONFIG
+          sed -i 's/^CONFIG_THINLTO=y/CONFIG_THINLTO=n/' $DEFCONFIG
 
-        export LLVM=1
-        export LLVM_IAS=1
-        export LLVM_LTO=none
-        export KCFLAGS="-Wno-error"
-        export KBUILD_BUILD_USER=ci
-        export KBUILD_BUILD_HOST=github
+          echo ">> After:"
+          grep CONFIG_LTO $DEFCONFIG || true
 
-        RECOMPILE_KERNEL=1 \
-        MAKEFLAGS="-j2" \
-        build/android/prepare_vendor.sh $CHIPSET_NAME gki gki
+      - name: Kernel defconfig
+        working-directory: Kernel/kernel_platform/msm-kernel
+        run: |
+          make vendor/x55_defconfig
 
-    # 8️⃣ Empacotar saída
-    - name: Package kernel output
-      run: |
-        mkdir -p artifacts
-        find . -type d -name "msm-$CHIPSET_NAME*" -exec cp -r {} artifacts/ \;
-        zip -r SM-M556B_kernel_build.zip artifacts
+      - name: Build kernel
+        working-directory: Kernel/kernel_platform/msm-kernel
+        run: |
+          make -j$(nproc)
 
-    # 9️⃣ Upload
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: SM-M556B_kernel_build
-        path: SM-M556B_kernel_build.zip
+      - name: Upload Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-image
+          path: |
+            Kernel/kernel_platform/msm-kernel/arch/arm64/boot/Image
+            Kernel/kernel_platform/msm-kernel/arch/arm64/boot/Image.gz
+            Kernel/kernel_platform/msm-kernel/arch/arm64/boot/Image.lz4

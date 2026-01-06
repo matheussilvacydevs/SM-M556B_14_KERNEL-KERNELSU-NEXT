@@ -1,4 +1,4 @@
-name: Build SM-M556B Samsung Kernel (Full Auto + Swap)
+name: Build SM-M556B Samsung Kernel (Full Auto + Swap + FreeSpace)
 
 on:
   workflow_dispatch:
@@ -10,28 +10,44 @@ jobs:
     env:
       BUILD_TARGET: m55xq_swa_open
       CHIPSET_NAME: x55
-      # Garante que o terminal não trave esperando input
       DEBIAN_FRONTEND: noninteractive
 
     steps:
-    # 1️⃣ Checkout (Configurado para baixar LFS automaticamente)
+    # 1️⃣ LIMPEZA DE DISCO (CRÍTICO: Libera ~30GB de espaço)
+    - name: Free Disk Space (Ubuntu)
+      uses: jlumbroso/free-disk-space@main
+      with:
+        # Manter apenas o necessário
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: true
+        swap-storage: true
+
+    # 2️⃣ Checkout
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
         lfs: true
+        fetch-depth: 1
 
-    # 2️⃣ SWAP (CRÍTICO: Corrige o erro "Cleaning up orphan processes")
-    - name: Setup Swap (12GB)
+    # 3️⃣ SWAP (Reduzido para 8GB para caber no disco)
+    - name: Setup Swap (8GB)
       run: |
-        echo "🔧 Criando arquivo de Swap..."
-        sudo fallocate -l 12G /swapfile
+        echo "🔧 Criando arquivo de Swap de 8GB..."
+        # Tenta alocar 8GB. Se falhar, tenta 4GB.
+        sudo fallocate -l 8G /swapfile || sudo fallocate -l 4G /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
         echo "✅ Swap ativado:"
         free -h
+        echo "💾 Espaço em disco restante:"
+        df -h
 
-    # 3️⃣ Dependências (Adicionado dwarves e lld)
+    # 4️⃣ Dependências
     - name: Install build dependencies
       run: |
         sudo apt update
@@ -40,7 +56,7 @@ jobs:
           libncurses-dev libssl-dev python3 \
           unzip wget rsync dwarves lld
 
-    # 4️⃣ Export variáveis Samsung
+    # 5️⃣ Export variáveis Samsung
     - name: Export Samsung build variables
       run: |
         echo "MODEL=$(echo $BUILD_TARGET | cut -d'_' -f1)" >> $GITHUB_ENV
@@ -52,24 +68,20 @@ jobs:
         echo "TARGET_BOARD_PLATFORM=gki" >> $GITHUB_ENV
         echo "IS_KBUILD=true" >> $GITHUB_ENV
 
-    # 5️⃣ Detectar estrutura real do kernel
+    # 6️⃣ Detectar estrutura real do kernel
     - name: Detect kernel structure
       run: |
         echo "🔍 Detectando layout..."
         if [ -d "Kernel/kernel_platform/build/android" ]; then
           echo "KERNEL_PATH=Kernel/kernel_platform" >> $GITHUB_ENV
-          echo "KERNEL_MODE=samsung" >> $GITHUB_ENV
         elif [ -d "kernel_platform/build/android" ]; then
           echo "KERNEL_PATH=kernel_platform" >> $GITHUB_ENV
-          echo "KERNEL_MODE=samsung" >> $GITHUB_ENV
         else
           echo "❌ kernel_platform/build/android não encontrado"
-          echo "📁 Estrutura do repo:"
-          find . -maxdepth 4 -type d
           exit 1
         fi
 
-    # 6️⃣ Usar clang do próprio repo (Samsung)
+    # 7️⃣ Usar clang do próprio repo (Samsung)
     - name: Setup Samsung clang
       run: |
         CLANG_DIR=$(find $KERNEL_PATH -path "*clang*/bin/clang" | head -n 1 | xargs dirname)
@@ -80,17 +92,16 @@ jobs:
         echo "✅ Clang encontrado em: $CLANG_DIR"
         echo "$CLANG_DIR" >> $GITHUB_PATH
 
-    # 7️⃣ Build kernel (OFICIAL)
+    # 8️⃣ Build kernel (OFICIAL)
     - name: Build Samsung GKI kernel
       run: |
         cd $KERNEL_PATH
         chmod +x build/android/prepare_vendor.sh
         
         echo "🚀 Iniciando compilação..."
-        # Como você já desativou o LTO no defconfig, isso deve rodar bem com o Swap
         RECOMPILE_KERNEL=1 build/android/prepare_vendor.sh $CHIPSET_NAME gki gki
 
-    # 8️⃣ Empacotar (Otimizado)
+    # 9️⃣ Empacotar (Otimizado)
     - name: Package kernel output
       run: |
         mkdir -p artifacts
@@ -112,7 +123,7 @@ jobs:
 
         zip -r SM-M556B_kernel_build.zip artifacts
 
-    # 9️⃣ Upload
+    # 🔟 Upload
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:

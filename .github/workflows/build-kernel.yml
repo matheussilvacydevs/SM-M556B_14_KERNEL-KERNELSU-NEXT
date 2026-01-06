@@ -1,81 +1,120 @@
-name: Build SM-M556B Kernel (FINAL / NO LTO / NO HDRINST)
+name: Build SM-M556B Samsung Kernel (Full Auto + Swap)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     env:
-      ARCH: arm64
-      SUBARCH: arm64
-      LLVM: 1
-      LLVM_IAS: 1
-      ANDROID_BUILD_TOP: ${{ github.workspace }}
-      INSTALL_HDR_PATH: /dev/null
-      SKIP_HEADERS_INSTALL: 1
+      BUILD_TARGET: m55xq_swa_open
+      CHIPSET_NAME: x55
+      # Garante que o terminal não trave esperando input
+      DEBIAN_FRONTEND: noninteractive
 
     steps:
-      # ===============================
-      # CHECKOUT
-      # ===============================
-      - name: Checkout kernel
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          submodules: false
+    # 1️⃣ Checkout (Configurado para baixar LFS automaticamente)
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        lfs: true
 
-      # ===============================
-      # DEPENDÊNCIAS
-      # ===============================
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y \
-            bc bison flex \
-            git git-lfs \
-            libssl-dev libelf-dev \
-            build-essential \
-            python3 \
-            clang lld \
-            ccache
+    # 2️⃣ SWAP (CRÍTICO: Corrige o erro "Cleaning up orphan processes")
+    - name: Setup Swap (12GB)
+      run: |
+        echo "🔧 Criando arquivo de Swap..."
+        sudo fallocate -l 12G /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+        echo "✅ Swap ativado:"
+        free -h
 
-      # ===============================
-      # CCACHE
-      # ===============================
-      - name: Setup ccache
-        run: |
-          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=2G" >> $GITHUB_ENV
-          echo "CCACHE_COMPRESS=1" >> $GITHUB_ENV
+    # 3️⃣ Dependências (Adicionado dwarves e lld)
+    - name: Install build dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          bc bison build-essential cpio flex git \
+          libncurses-dev libssl-dev python3 \
+          unzip wget rsync dwarves lld
 
-      # ===============================
-      # FORÇAR DESATIVAR LTO
-      # ===============================
-      - name: Force disable LTO
-        run: |
-          DEFCONFIG=Kernel/kernel_platform/msm-kernel/arch/arm64/configs/vendor/x55_defconfig
+    # 4️⃣ Export variáveis Samsung
+    - name: Export Samsung build variables
+      run: |
+        echo "MODEL=$(echo $BUILD_TARGET | cut -d'_' -f1)" >> $GITHUB_ENV
+        echo "PROJECT_NAME=$(echo $BUILD_TARGET | cut -d'_' -f1)" >> $GITHUB_ENV
+        echo "REGION=$(echo $BUILD_TARGET | cut -d'_' -f2)" >> $GITHUB_ENV
+        echo "CARRIER=$(echo $BUILD_TARGET | cut -d'_' -f3)" >> $GITHUB_ENV
+        echo "ANDROID_BUILD_TOP=$PWD" >> $GITHUB_ENV
+        echo "TARGET_PRODUCT=gki" >> $GITHUB_ENV
+        echo "TARGET_BOARD_PLATFORM=gki" >> $GITHUB_ENV
+        echo "IS_KBUILD=true" >> $GITHUB_ENV
 
-          sed -i 's/CONFIG_LTO=y/CONFIG_LTO=n/g' $DEFCONFIG || true
-          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/g' $DEFCONFIG || true
-          sed -i 's/CONFIG_LTO_CLANG_THIN=y/CONFIG_LTO_CLANG_THIN=n/g' $DEFCONFIG || true
-          sed -i 's/CONFIG_LTO_CLANG_FULL=y/CONFIG_LTO_CLANG_FULL=n/g' $DEFCONFIG || true
+    # 5️⃣ Detectar estrutura real do kernel
+    - name: Detect kernel structure
+      run: |
+        echo "🔍 Detectando layout..."
+        if [ -d "Kernel/kernel_platform/build/android" ]; then
+          echo "KERNEL_PATH=Kernel/kernel_platform" >> $GITHUB_ENV
+          echo "KERNEL_MODE=samsung" >> $GITHUB_ENV
+        elif [ -d "kernel_platform/build/android" ]; then
+          echo "KERNEL_PATH=kernel_platform" >> $GITHUB_ENV
+          echo "KERNEL_MODE=samsung" >> $GITHUB_ENV
+        else
+          echo "❌ kernel_platform/build/android não encontrado"
+          echo "📁 Estrutura do repo:"
+          find . -maxdepth 4 -type d
+          exit 1
+        fi
 
-          grep -q CONFIG_LTO_NONE $DEFCONFIG || echo "CONFIG_LTO_NONE=y" >> $DEFCONFIG
+    # 6️⃣ Usar clang do próprio repo (Samsung)
+    - name: Setup Samsung clang
+      run: |
+        CLANG_DIR=$(find $KERNEL_PATH -path "*clang*/bin/clang" | head -n 1 | xargs dirname)
+        if [ -z "$CLANG_DIR" ]; then
+          echo "❌ Clang não encontrado no repo"
+          exit 1
+        fi
+        echo "✅ Clang encontrado em: $CLANG_DIR"
+        echo "$CLANG_DIR" >> $GITHUB_PATH
 
-      # ===============================
-      # DEFCONFIG
-      # ===============================
-      - name: Kernel defconfig
-        working-directory: Kernel/kernel_platform/msm-kernel
-        run: |
-          make O=out vendor/x55_defconfig
+    # 7️⃣ Build kernel (OFICIAL)
+    - name: Build Samsung GKI kernel
+      run: |
+        cd $KERNEL_PATH
+        chmod +x build/android/prepare_vendor.sh
+        
+        echo "🚀 Iniciando compilação..."
+        # Como você já desativou o LTO no defconfig, isso deve rodar bem com o Swap
+        RECOMPILE_KERNEL=1 build/android/prepare_vendor.sh $CHIPSET_NAME gki gki
 
-      # ===============================
-      # BUILD (HDRINST BLOQUEADO)
-      # ===============================
-      - name: Build kernel Image ONLY
-        working-directory: Kernel/kernel_platform/msm-kernel
-        run: |
-          make -j$(n
+    # 8️⃣ Empacotar (Otimizado)
+    - name: Package kernel output
+      run: |
+        mkdir -p artifacts
+        echo "📦 Empacotando arquivos..."
+        
+        # Tenta achar a pasta 'dist' que contém os arquivos finais limpos
+        DIST_DIR=$(find . -type d -name "dist" | grep "out" | head -n 1)
+        
+        if [ -n "$DIST_DIR" ]; then
+            echo "✅ Pasta dist encontrada: $DIST_DIR"
+            cp -r $DIST_DIR/* artifacts/
+        else
+            echo "⚠️ Pasta dist não encontrada. Buscando Image manualmente..."
+            find . -name "Image" -exec cp {} artifacts/ \;
+            find . -name "Image.lz4" -exec cp {} artifacts/ \;
+            find . -name "*.dtb" -exec cp {} artifacts/ \;
+            find . -name "dtbo.img" -exec cp {} artifacts/ \;
+        fi
+
+        zip -r SM-M556B_kernel_build.zip artifacts
+
+    # 9️⃣ Upload
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: SM-M556B_kernel_build
+        path: SM-M556B_kernel_build.zip

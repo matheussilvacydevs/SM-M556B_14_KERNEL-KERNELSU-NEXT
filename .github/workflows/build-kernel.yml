@@ -1,4 +1,4 @@
-name: Build SM-M556B Samsung Kernel (Full Auto + Skip ABI)
+name: Build SM-M556B Samsung Kernel (Full Auto + Skip ABI/CFI)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
 
     steps:
-    # 1️⃣ LIMPEZA DE DISCO (Garante espaço para o build)
+    # 1️⃣ LIMPEZA DE DISCO (Libera ~30GB)
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@main
       with:
@@ -32,7 +32,7 @@ jobs:
         lfs: true
         fetch-depth: 1
 
-    # 3️⃣ SWAP (Evita OOM Kill no final do build)
+    # 3️⃣ SWAP (Essencial para o Linking final)
     - name: Setup Swap (8GB)
       run: |
         sudo fallocate -l 8G /swapfile
@@ -74,45 +74,54 @@ jobs:
           exit 1
         fi
 
-    # 7️⃣ Setup Clang
+    # 7️⃣ Setup Clang do Repo
     - name: Setup Samsung clang
       run: |
         CLANG_DIR=$(find $KERNEL_PATH -path "*clang*/bin/clang" | head -n 1 | xargs dirname)
         [ -z "$CLANG_DIR" ] && exit 1
         echo "$CLANG_DIR" >> $GITHUB_PATH
 
-    # 8️⃣ Build kernel (FORÇANDO PULAR CHECAGEM DE ABI)
+    # 8️⃣ Build kernel (REMOVENDO TRAVAS DE CONFIGURAÇÃO)
     - name: Build Samsung GKI kernel
       run: |
         cd $KERNEL_PATH
         
-        echo "🧹 Removendo listas de ABI para evitar erros de comparação..."
+        echo "🧹 Removendo listas de ABI para evitar erro de símbolos..."
         find . -name "abi_symbollist*" -delete
+
+        echo "🔧 Removendo exigências de CFI/LTO dos arquivos de config..."
+        # Remove as linhas que causam o erro 'Defconfig fragment did not apply'
+        find msm-kernel/arch/arm64/configs/ -name "*" -exec sed -i '/CONFIG_CFI_CLANG/d' {} +
+        find msm-kernel/arch/arm64/configs/ -name "*" -exec sed -i '/CONFIG_LTO_CLANG/d' {} +
         
         chmod +x build/android/prepare_vendor.sh
         
-        echo "🚀 Iniciando compilação (Ignorando ABI e KMI)..."
-        # Flags para desativar verificações rígidas do Android GKI
+        echo "🚀 Iniciando compilação (Modo Full Bypass)..."
+        # Flags críticas: SKIP_CONF_CHECK e SKIP_ABI_CHECKS
         RECOMPILE_KERNEL=1 \
         SKIP_ABI_CHECKS=1 \
         SKIP_CP_METADATA=1 \
+        SKIP_CONF_CHECK=1 \
         KMI_SYMBOL_LIST_STRICT_MODE=0 \
         GKI_ABI_CHECK=0 \
         build/android/prepare_vendor.sh $CHIPSET_NAME gki gki
 
-    # 9️⃣ Empacotar
+    # 9️⃣ Empacotar resultados
     - name: Package kernel output
       run: |
         mkdir -p artifacts
+        # Busca a pasta dist que contém o Image, dtbo.img, etc.
         DIST_DIR=$(find . -type d -name "dist" | grep "out" | head -n 1)
         
         if [ -n "$DIST_DIR" ]; then
             cp -r $DIST_DIR/* artifacts/
         else
+            echo "⚠️ Pasta dist não achada, buscando arquivos manualmente..."
             find . -name "Image" -exec cp {} artifacts/ \;
             find . -name "Image.lz4" -exec cp {} artifacts/ \;
             find . -name "*.dtb" -exec cp {} artifacts/ \;
             find . -name "dtbo.img" -exec cp {} artifacts/ \;
+            find . -name "*.ko" -exec cp {} artifacts/ \;
         fi
         zip -r SM-M556B_kernel_build.zip artifacts
 

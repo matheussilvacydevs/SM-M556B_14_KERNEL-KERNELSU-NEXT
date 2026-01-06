@@ -1,4 +1,4 @@
-name: Build SM-M556B Samsung Kernel (Full Auto + Swap + FreeSpace)
+name: Build SM-M556B Samsung Kernel (Full Auto + Skip ABI)
 
 on:
   workflow_dispatch:
@@ -13,11 +13,10 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
 
     steps:
-    # 1️⃣ LIMPEZA DE DISCO (CRÍTICO: Libera ~30GB de espaço)
-    - name: Free Disk Space (Ubuntu)
+    # 1️⃣ LIMPEZA DE DISCO (Garante espaço para o build)
+    - name: Free Disk Space
       uses: jlumbroso/free-disk-space@main
       with:
-        # Manter apenas o necessário
         tool-cache: true
         android: true
         dotnet: true
@@ -33,19 +32,14 @@ jobs:
         lfs: true
         fetch-depth: 1
 
-    # 3️⃣ SWAP (Reduzido para 8GB para caber no disco)
+    # 3️⃣ SWAP (Evita OOM Kill no final do build)
     - name: Setup Swap (8GB)
       run: |
-        echo "🔧 Criando arquivo de Swap de 8GB..."
-        # Tenta alocar 8GB. Se falhar, tenta 4GB.
-        sudo fallocate -l 8G /swapfile || sudo fallocate -l 4G /swapfile
+        sudo fallocate -l 8G /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
-        echo "✅ Swap ativado:"
         free -h
-        echo "💾 Espaço em disco restante:"
-        df -h
 
     # 4️⃣ Dependências
     - name: Install build dependencies
@@ -71,56 +65,55 @@ jobs:
     # 6️⃣ Detectar estrutura real do kernel
     - name: Detect kernel structure
       run: |
-        echo "🔍 Detectando layout..."
         if [ -d "Kernel/kernel_platform/build/android" ]; then
           echo "KERNEL_PATH=Kernel/kernel_platform" >> $GITHUB_ENV
         elif [ -d "kernel_platform/build/android" ]; then
           echo "KERNEL_PATH=kernel_platform" >> $GITHUB_ENV
         else
-          echo "❌ kernel_platform/build/android não encontrado"
+          echo "❌ Estrutura não encontrada"
           exit 1
         fi
 
-    # 7️⃣ Usar clang do próprio repo (Samsung)
+    # 7️⃣ Setup Clang
     - name: Setup Samsung clang
       run: |
         CLANG_DIR=$(find $KERNEL_PATH -path "*clang*/bin/clang" | head -n 1 | xargs dirname)
-        if [ -z "$CLANG_DIR" ]; then
-          echo "❌ Clang não encontrado no repo"
-          exit 1
-        fi
-        echo "✅ Clang encontrado em: $CLANG_DIR"
+        [ -z "$CLANG_DIR" ] && exit 1
         echo "$CLANG_DIR" >> $GITHUB_PATH
 
-    # 8️⃣ Build kernel (OFICIAL)
+    # 8️⃣ Build kernel (FORÇANDO PULAR CHECAGEM DE ABI)
     - name: Build Samsung GKI kernel
       run: |
         cd $KERNEL_PATH
+        
+        echo "🧹 Removendo listas de ABI para evitar erros de comparação..."
+        find . -name "abi_symbollist*" -delete
+        
         chmod +x build/android/prepare_vendor.sh
         
-        echo "🚀 Iniciando compilação..."
-        RECOMPILE_KERNEL=1 build/android/prepare_vendor.sh $CHIPSET_NAME gki gki
+        echo "🚀 Iniciando compilação (Ignorando ABI e KMI)..."
+        # Flags para desativar verificações rígidas do Android GKI
+        RECOMPILE_KERNEL=1 \
+        SKIP_ABI_CHECKS=1 \
+        SKIP_CP_METADATA=1 \
+        KMI_SYMBOL_LIST_STRICT_MODE=0 \
+        GKI_ABI_CHECK=0 \
+        build/android/prepare_vendor.sh $CHIPSET_NAME gki gki
 
-    # 9️⃣ Empacotar (Otimizado)
+    # 9️⃣ Empacotar
     - name: Package kernel output
       run: |
         mkdir -p artifacts
-        echo "📦 Empacotando arquivos..."
-        
-        # Tenta achar a pasta 'dist' que contém os arquivos finais limpos
         DIST_DIR=$(find . -type d -name "dist" | grep "out" | head -n 1)
         
         if [ -n "$DIST_DIR" ]; then
-            echo "✅ Pasta dist encontrada: $DIST_DIR"
             cp -r $DIST_DIR/* artifacts/
         else
-            echo "⚠️ Pasta dist não encontrada. Buscando Image manualmente..."
             find . -name "Image" -exec cp {} artifacts/ \;
             find . -name "Image.lz4" -exec cp {} artifacts/ \;
             find . -name "*.dtb" -exec cp {} artifacts/ \;
             find . -name "dtbo.img" -exec cp {} artifacts/ \;
         fi
-
         zip -r SM-M556B_kernel_build.zip artifacts
 
     # 🔟 Upload

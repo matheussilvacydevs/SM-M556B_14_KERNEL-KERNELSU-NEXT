@@ -1,4 +1,4 @@
-name: Build SM-M556B (Bypass LFS + Auto Clang)
+name: Build SM-M556B (Native Clang + Bypass)
 
 on:
   workflow_dispatch:
@@ -25,7 +25,7 @@ jobs:
         docker-images: true
         swap-storage: true
 
-    # 2️⃣ Checkout SEM LFS (Para evitar o erro de cota)
+    # 2️⃣ Checkout SEM LFS
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
@@ -41,28 +41,16 @@ jobs:
         sudo swapon /swapfile
         free -h
 
-    # 4️⃣ Dependências
+    # 4️⃣ Dependências (Adicionado clang e lld explicitamente)
     - name: Install build dependencies
       run: |
         sudo apt update
         sudo apt install -y \
           bc bison build-essential cpio flex git \
           libncurses-dev libssl-dev python3 \
-          unzip wget rsync dwarves lld
+          unzip wget rsync dwarves lld clang llvm
 
-    # 5️⃣ Baixar Clang Oficial (Android 14 / Clang 17)
-    # Isso substitui os arquivos que estão travados no seu LFS
-    - name: Download Google Clang
-      run: |
-        mkdir -p $GITHUB_WORKSPACE/clang-main
-        cd $GITHUB_WORKSPACE/clang-main
-        # Link para o Clang r487747c (comum em kernels Android 14)
-        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r487747c.tar.gz
-        tar -xf clang-r487747c.tar.gz
-        echo "$GITHUB_WORKSPACE/clang-main/bin" >> $GITHUB_PATH
-        echo "✅ Clang baixado e configurado no PATH"
-
-    # 6️⃣ Export variáveis Samsung
+    # 5️⃣ Export variáveis Samsung
     - name: Export Samsung build variables
       run: |
         echo "MODEL=$(echo $BUILD_TARGET | cut -d'_' -f1)" >> $GITHUB_ENV
@@ -72,7 +60,7 @@ jobs:
         echo "TARGET_BOARD_PLATFORM=gki" >> $GITHUB_ENV
         echo "IS_KBUILD=true" >> $GITHUB_ENV
 
-    # 7️⃣ Detectar estrutura real do kernel
+    # 6️⃣ Detectar estrutura real do kernel
     - name: Detect kernel structure
       run: |
         if [ -d "Kernel/kernel_platform/build/android" ]; then
@@ -84,7 +72,7 @@ jobs:
           exit 1
         fi
 
-    # 8️⃣ Build kernel (Full Bypass)
+    # 7️⃣ Build kernel (Usando Clang do Sistema)
     - name: Build Samsung GKI kernel
       run: |
         cd $KERNEL_PATH
@@ -96,18 +84,19 @@ jobs:
         
         chmod +x build/android/prepare_vendor.sh
         
-        echo "🚀 Iniciando compilação..."
-        # Usamos o CLANG_PATH apontando para o que baixamos no Passo 5
+        echo "🚀 Iniciando compilação com Clang nativo..."
+        # Forçamos o uso do Clang instalado no /usr/bin
         RECOMPILE_KERNEL=1 \
         SKIP_ABI_CHECKS=1 \
         SKIP_CP_METADATA=1 \
         SKIP_CONF_CHECK=1 \
         KMI_SYMBOL_LIST_STRICT_MODE=0 \
         GKI_ABI_CHECK=0 \
-        REAL_CLANG_PATH=$GITHUB_WORKSPACE/clang-main/bin \
+        CLANG_PREBUILT_BIN=true \
+        REAL_CLANG_PATH=/usr/bin \
         build/android/prepare_vendor.sh $CHIPSET_NAME gki gki
 
-    # 9️⃣ Empacotar
+    # 8️⃣ Empacotar
     - name: Package kernel output
       run: |
         mkdir -p artifacts
@@ -120,10 +109,11 @@ jobs:
             find . -name "Image.lz4" -exec cp {} artifacts/ \;
             find . -name "*.dtb" -exec cp {} artifacts/ \;
             find . -name "dtbo.img" -exec cp {} artifacts/ \;
+            find . -name "*.ko" -exec cp {} artifacts/ \;
         fi
         zip -r SM-M556B_kernel_build.zip artifacts
 
-    # 🔟 Upload
+    # 9️⃣ Upload
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:

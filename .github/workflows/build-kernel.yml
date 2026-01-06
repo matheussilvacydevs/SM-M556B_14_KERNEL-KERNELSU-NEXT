@@ -1,4 +1,4 @@
-name: Build SM-M556B Samsung Kernel (Full Auto + Skip ABI/CFI)
+name: Build SM-M556B (Bypass LFS + Auto Clang)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
 
     steps:
-    # 1️⃣ LIMPEZA DE DISCO (Libera ~30GB)
+    # 1️⃣ LIMPEZA DE DISCO
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@main
       with:
@@ -25,14 +25,14 @@ jobs:
         docker-images: true
         swap-storage: true
 
-    # 2️⃣ Checkout
+    # 2️⃣ Checkout SEM LFS (Para evitar o erro de cota)
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        lfs: true
+        lfs: false
         fetch-depth: 1
 
-    # 3️⃣ SWAP (Essencial para o Linking final)
+    # 3️⃣ SWAP
     - name: Setup Swap (8GB)
       run: |
         sudo fallocate -l 8G /swapfile
@@ -50,19 +50,29 @@ jobs:
           libncurses-dev libssl-dev python3 \
           unzip wget rsync dwarves lld
 
-    # 5️⃣ Export variáveis Samsung
+    # 5️⃣ Baixar Clang Oficial (Android 14 / Clang 17)
+    # Isso substitui os arquivos que estão travados no seu LFS
+    - name: Download Google Clang
+      run: |
+        mkdir -p $GITHUB_WORKSPACE/clang-main
+        cd $GITHUB_WORKSPACE/clang-main
+        # Link para o Clang r487747c (comum em kernels Android 14)
+        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r487747c.tar.gz
+        tar -xf clang-r487747c.tar.gz
+        echo "$GITHUB_WORKSPACE/clang-main/bin" >> $GITHUB_PATH
+        echo "✅ Clang baixado e configurado no PATH"
+
+    # 6️⃣ Export variáveis Samsung
     - name: Export Samsung build variables
       run: |
         echo "MODEL=$(echo $BUILD_TARGET | cut -d'_' -f1)" >> $GITHUB_ENV
         echo "PROJECT_NAME=$(echo $BUILD_TARGET | cut -d'_' -f1)" >> $GITHUB_ENV
-        echo "REGION=$(echo $BUILD_TARGET | cut -d'_' -f2)" >> $GITHUB_ENV
-        echo "CARRIER=$(echo $BUILD_TARGET | cut -d'_' -f3)" >> $GITHUB_ENV
         echo "ANDROID_BUILD_TOP=$PWD" >> $GITHUB_ENV
         echo "TARGET_PRODUCT=gki" >> $GITHUB_ENV
         echo "TARGET_BOARD_PLATFORM=gki" >> $GITHUB_ENV
         echo "IS_KBUILD=true" >> $GITHUB_ENV
 
-    # 6️⃣ Detectar estrutura real do kernel
+    # 7️⃣ Detectar estrutura real do kernel
     - name: Detect kernel structure
       run: |
         if [ -d "Kernel/kernel_platform/build/android" ]; then
@@ -74,54 +84,42 @@ jobs:
           exit 1
         fi
 
-    # 7️⃣ Setup Clang do Repo
-    - name: Setup Samsung clang
-      run: |
-        CLANG_DIR=$(find $KERNEL_PATH -path "*clang*/bin/clang" | head -n 1 | xargs dirname)
-        [ -z "$CLANG_DIR" ] && exit 1
-        echo "$CLANG_DIR" >> $GITHUB_PATH
-
-    # 8️⃣ Build kernel (REMOVENDO TRAVAS DE CONFIGURAÇÃO)
+    # 8️⃣ Build kernel (Full Bypass)
     - name: Build Samsung GKI kernel
       run: |
         cd $KERNEL_PATH
         
-        echo "🧹 Removendo listas de ABI para evitar erro de símbolos..."
+        echo "🧹 Limpando travas de ABI e Config..."
         find . -name "abi_symbollist*" -delete
-
-        echo "🔧 Removendo exigências de CFI/LTO dos arquivos de config..."
-        # Remove as linhas que causam o erro 'Defconfig fragment did not apply'
         find msm-kernel/arch/arm64/configs/ -name "*" -exec sed -i '/CONFIG_CFI_CLANG/d' {} +
         find msm-kernel/arch/arm64/configs/ -name "*" -exec sed -i '/CONFIG_LTO_CLANG/d' {} +
         
         chmod +x build/android/prepare_vendor.sh
         
-        echo "🚀 Iniciando compilação (Modo Full Bypass)..."
-        # Flags críticas: SKIP_CONF_CHECK e SKIP_ABI_CHECKS
+        echo "🚀 Iniciando compilação..."
+        # Usamos o CLANG_PATH apontando para o que baixamos no Passo 5
         RECOMPILE_KERNEL=1 \
         SKIP_ABI_CHECKS=1 \
         SKIP_CP_METADATA=1 \
         SKIP_CONF_CHECK=1 \
         KMI_SYMBOL_LIST_STRICT_MODE=0 \
         GKI_ABI_CHECK=0 \
+        REAL_CLANG_PATH=$GITHUB_WORKSPACE/clang-main/bin \
         build/android/prepare_vendor.sh $CHIPSET_NAME gki gki
 
-    # 9️⃣ Empacotar resultados
+    # 9️⃣ Empacotar
     - name: Package kernel output
       run: |
         mkdir -p artifacts
-        # Busca a pasta dist que contém o Image, dtbo.img, etc.
         DIST_DIR=$(find . -type d -name "dist" | grep "out" | head -n 1)
         
         if [ -n "$DIST_DIR" ]; then
             cp -r $DIST_DIR/* artifacts/
         else
-            echo "⚠️ Pasta dist não achada, buscando arquivos manualmente..."
             find . -name "Image" -exec cp {} artifacts/ \;
             find . -name "Image.lz4" -exec cp {} artifacts/ \;
             find . -name "*.dtb" -exec cp {} artifacts/ \;
             find . -name "dtbo.img" -exec cp {} artifacts/ \;
-            find . -name "*.ko" -exec cp {} artifacts/ \;
         fi
         zip -r SM-M556B_kernel_build.zip artifacts
 

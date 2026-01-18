@@ -1,0 +1,77 @@
+name: Galaxy M55 Kernel Release (Android 14)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create tag
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag v1.0-android14-kernelsu-next
+          git push origin v1.0-android14-kernelsu-next
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0-android14-kernelsu-next
+          name: Galaxy M55 • Android 14 • KernelSU Next v3
+          body: |
+            # Samsung Galaxy M55 Kernel (SM-M556B)
+
+            **Android:** 14 (One UI 6.1)  
+            **Root:** KernelSU Next v3  
+            **Base:** Samsung Stock Kernel  
+
+            ---
+
+            ## 📦 Download
+
+            👉 **Boot Image (.img)**  
+            https://www.mediafire.com/file/t0hxq5m253ap842/boot-m55-android14-kernelsu-next-v3.img/file
+
+            ---
+
+            ## 🔐 Root
+
+            Root em nível de kernel via **KernelSU Next v3**  
+            Sem Magisk no boot.
+
+            ---
+
+            ## 🙏 Agradecimentos
+
+            **Agradecimento especial ao criador do KernelSU**
+
+            - **@tiann**  
+              https://github.com/tiann  
+
+            **Projetos e colaboradores**
+
+            - KernelSU  
+              https://github.com/tiann/KernelSU  
+            - KernelSU Next  
+              https://github.com/KernelSU-Next  
+            - @DevzPlayer  
+              https://github.com/DevzPlayer  
+            - @rifsxd  
+              https://github.com/rifsxd  
+
+            ---
+
+            ## ⚠️ Aviso
+
+            Destinado a usuários avançados.  
+            Flash incorreto pode causar bootloop.
+          draft: false
+          prerelease: false

@@ -21,19 +21,26 @@ jobs:
           git tag -f v1.0-android14-kernelsu-next
           git push -f origin v1.0-android14-kernelsu-next
 
-      - name: Download boot image from MediaFire
+      - name: Download boot image from SourceForge
         run: |
           mkdir -p artifacts
-          curl -L \
-            "https://www.mediafire.com/file/t0hxq5m253ap842/boot-m55-android14-kernelsu-next-v3.img/file?dkey=fvvtw5b2rrk&r=1712&download=1" \
-            -o artifacts/boot-m55-android14-kernelsu-next-v3.img
+          wget -O artifacts/boot-m55-android14-kernelsu-next-v3.img \
+          "https://downloads.sourceforge.net/project/sm-m556b-14-kernelsu-next/android14/KernelSU-Next/boot-m55-android14-kernelsu-next-v3.img"
 
-      - name: Verify downloaded file
+      - name: Validate boot image
         run: |
-          echo "Arquivo baixado:"
-          ls -lh artifacts
-          echo "Tipo do arquivo:"
-          file artifacts/boot-m55-android14-kernelsu-next-v3.img
+          FILE="artifacts/boot-m55-android14-kernelsu-next-v3.img"
+          echo "Tipo:"
+          file "$FILE"
+          if file "$FILE" | grep -qi "HTML"; then
+            echo "ERRO: Arquivo inválido (HTML em vez do boot.img)"
+            exit 1
+          fi
+          SIZE=$(stat -c%s "$FILE")
+          if [ "$SIZE" -lt 50000000 ]; then
+            echo "ERRO: Arquivo muito pequeno"
+            exit 1
+          fi
 
       - name: Create or update GitHub Release and upload asset
         uses: softprops/action-gh-release@v2
@@ -42,66 +49,27 @@ jobs:
           name: Galaxy M55 • Android 14 • KernelSU Next v3
           body: |
             # Samsung Galaxy M55 Kernel (SM-M556B)
-
             **Android:** 14 (One UI 6.1)  
             **Root:** KernelSU Next v3  
-            **Base:** Samsung Stock Kernel  
-
-            ---
+            **Base:** Samsung Stock Kernel
 
             ## 📦 Download
-
-            O arquivo abaixo está disponível diretamente nos **Assets deste Release**.
-
-            ---
+            O arquivo `.img` já está disponível nos **Assets deste Release**.
 
             ## 🔐 Root
-
-            Root em nível de kernel via **KernelSU Next v3**, integrado diretamente
-            ao kernel, sem uso de Magisk no boot.
-
-            ---
+            Root via **KernelSU Next v3** integrado ao kernel.
 
             ## 🙏 Agradecimentos
+            Agradecimentos especiais a:
+            **Tiann** — criador do KernelSU — https://github.com/tiann  
+            Projetos:
+            - KernelSU — https://github.com/tiann/KernelSU  
+            - KernelSU Next — https://github.com/KernelSU-Next  
+            Colaborações:
+            - **Fernanda** (GitHub: DevzPlayer) — contribuições técnicas  
+            - **rifsxd** — suporte ao kernel Android
 
-            Este projeto é resultado do trabalho coletivo da comunidade open source
-            e de desenvolvedores que elevaram o nível do root e do desenvolvimento
-            de kernels no Android.
-
-            ### 🌟 Agradecimento especial
-
-            **Tiann**  
-            Criador e mantenedor do **KernelSU**.  
-            Toda a arquitetura de root em nível de kernel, conceitos de segurança
-            e a base técnica utilizada neste projeto existem graças ao seu trabalho.  
-            https://github.com/tiann  
-
-            ### 🧩 Projetos fundamentais
-
-            - **KernelSU**  
-              https://github.com/tiann/KernelSU  
-
-            - **KernelSU Next**  
-              https://github.com/KernelSU-Next  
-
-            ### 🤝 Colaborações e contribuições
-
-            - **Fernanda**  
-              Contribuições técnicas, testes e apoio no ecossistema de kernels Samsung.  
-              GitHub: https://github.com/DevzPlayer  
-
-            - **rifsxd**  
-              Referências técnicas e contribuições relevantes para o desenvolvimento
-              de kernel Android.  
-              https://github.com/rifsxd  
-
-            ---
-
-            ## ⚠️ Aviso
-
-            Este kernel é destinado a **usuários avançados**.  
-            Flash incorreto pode causar **bootloop ou soft-brick**.
-
+            ⚠️ Destinado a usuários avançados.  
             Use por sua conta e risco.
           files: |
             artifacts/boot-m55-android14-kernelsu-next-v3.img

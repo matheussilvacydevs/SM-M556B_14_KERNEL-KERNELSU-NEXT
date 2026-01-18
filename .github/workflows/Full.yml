@@ -3,75 +3,82 @@ name: Galaxy M55 Kernel Release (Android 14)
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   release:
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create tag
+      - name: Create or update tag
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git tag v1.0-android14-kernelsu-next
-          git push origin v1.0-android14-kernelsu-next
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git tag -f v1.0-android14-kernelsu-next
+          git push -f origin v1.0-android14-kernelsu-next
 
-      - name: Create GitHub Release
+      - name: Download boot.img from SourceForge
+        run: |
+          mkdir -p artifacts
+          wget \
+            --content-disposition \
+            --trust-server-names \
+            --retry-connrefused \
+            --waitretry=5 \
+            --tries=5 \
+            --timeout=30 \
+            -O artifacts/boot-m55-android14-kernelsu-next-v3.img \
+            "https://downloads.sourceforge.net/project/sm-m556b-14-kernelsu-next/android14/KernelSU-Next/boot-m55-android14-kernelsu-next-v3.img"
+
+      - name: Validate boot image
+        run: |
+          FILE="artifacts/boot-m55-android14-kernelsu-next-v3.img"
+          echo "Tipo do arquivo:"
+          file "$FILE"
+
+          if file "$FILE" | grep -qi "HTML"; then
+            echo "ERRO: Download retornou HTML (SourceForge redirect)"
+            exit 1
+          fi
+
+          SIZE=$(stat -c%s "$FILE")
+          echo "Tamanho: $SIZE bytes"
+
+          if [ "$SIZE" -lt 50000000 ]; then
+            echo "ERRO: Arquivo muito pequeno para ser boot.img"
+            exit 1
+          fi
+
+      - name: Create GitHub Release and upload asset
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0-android14-kernelsu-next
           name: Galaxy M55 • Android 14 • KernelSU Next v3
           body: |
-            # Samsung Galaxy M55 Kernel (SM-M556B)
+            ## Samsung Galaxy M55 (SM-M556B)
 
             **Android:** 14 (One UI 6.1)  
+            **Kernel:** Stock Samsung  
             **Root:** KernelSU Next v3  
-            **Base:** Samsung Stock Kernel  
 
-            ---
+            ### 📦 Arquivo
+            - boot-m55-android14-kernelsu-next-v3.img
 
-            ## 📦 Download
+            ### 🙏 Agradecimentos
+            **Tiann** — criador do KernelSU  
+            https://github.com/tiann  
 
-            👉 **Boot Image (.img)**  
-            https://www.mediafire.com/file/t0hxq5m253ap842/boot-m55-android14-kernelsu-next-v3.img/file
+            Projetos:
+            - KernelSU — https://github.com/tiann/KernelSU
+            - KernelSU Next — https://github.com/KernelSU-Next
 
-            ---
+            Contribuições:
+            - **Fernanda** (DevzPlayer)
+            - **rifsxd**
 
-            ## 🔐 Root
-
-            Root em nível de kernel via **KernelSU Next v3**  
-            Sem Magisk no boot.
-
-            ---
-
-            ## 🙏 Agradecimentos
-
-            **Agradecimento especial ao criador do KernelSU**
-
-            - **@tiann**  
-              https://github.com/tiann  
-
-            **Projetos e colaboradores**
-
-            - KernelSU  
-              https://github.com/tiann/KernelSU  
-            - KernelSU Next  
-              https://github.com/KernelSU-Next  
-            - @DevzPlayer  
-              https://github.com/DevzPlayer  
-            - @rifsxd  
-              https://github.com/rifsxd  
-
-            ---
-
-            ## ⚠️ Aviso
-
-            Destinado a usuários avançados.  
-            Flash incorreto pode causar bootloop.
-          draft: false
-          prerelease: false
+            ⚠️ Uso por sua conta e risco.
+          files: artifacts/boot-m55-android14-kernelsu-next-v3.img
